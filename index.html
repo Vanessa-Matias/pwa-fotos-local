@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PWA Simples — Fotos + Local</title>
+  <meta name="description" content="PWA simples: foto + geolocalização + API pública (Nominatim)" />
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    body{max-width:900px;margin:18px auto;padding:12px;color:#111; background-color: #f0f2f5;}
+    header{display:flex;align-items:center;gap:12px; padding-bottom: 12px; border-bottom: 1px solid #ddd;}
+    h1{font-size:1.25rem;margin:0}
+    .card{background:white;border-radius:12px;padding:16px;margin-top:18px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+    button{padding:.6rem 1rem;border-radius:8px;border:0;background:#0b74ff;color:white;font-weight:600;cursor:pointer;transition:background .2s}
+    button:hover{background:#0a63d6}
+    .small{font-size:.85rem;color:#444}
+    img.preview{max-width:100%;height:auto;border-radius:8px;margin-top:12px; border: 1px solid #eee;}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    ul#records{list-style:none;padding:0;margin-top:12px}
+    li.record{display:flex;gap:12px;align-items:center;padding:12px;border-radius:8px;background:#f8f9fb;margin-bottom:8px}
+    li.record img{width:84px;height:84px;object-fit:cover;border-radius:6px}
+    .meta{font-size:.9rem}
+    footer{margin-top:24px;font-size:.8rem;color:#666;text-align:center}
+    .ghost{background:transparent;border:1px solid #ccc;color:#333}
+    .ghost:hover{background:#eee}
+    #status { padding: 8px; background-color: #e9ecef; border-radius: 6px; }
+    @media(min-width:700px){body{padding:24px}}
+  </style>
+</head>
+<body>
+  <header>
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%230b74ff'/><path d='M7 9h10v7H7z' fill='white'/><circle cx='12' cy='12.5' r='1.5' fill='%230b74ff'/></svg>" alt="logo" width="48" height="48">
+    <div>
+      <h1>PWA: Fotos + Local (Simples)</h1>
+      <div class="small">Tire foto, capture a localização e obtenha o endereço via API pública.</div>
+    </div>
+  </header>
+
+  <main class="card" role="main">
+    <div>
+      <div class="row">
+        <button id="btnTakePhoto">📷 Tirar / Selecionar Foto</button>
+        <button id="btnGetLoc" class="ghost">📍 Obter Localização</button>
+        <button id="btnSave" class="ghost">💾 Salvar Registro</button>
+        <button id="btnExport" class="ghost">⬇️ Exportar JSON</button>
+      </div>
+
+      <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none">
+
+      <div id="previewWrap" style="margin-top:10px">
+        <img id="preview" class="preview" alt="Pré-visualização" src="" style="display:none">
+      </div>
+
+      <div id="locationInfo" style="margin-top:10px;display:none">
+        <div class="small">Latitude: <span id="lat"></span></div>
+        <div class="small">Longitude: <span id="lon"></span></div>
+        <div class="small">Endereço (API): <span id="address"></span></div>
+      </div>
+
+      <p id="status" class="small" style="margin-top:10px;color:#555">Status: pronto</p>
+
+      <h3 style="margin-top:18px; border-top: 1px solid #eee; padding-top: 18px;">Registros salvos</h3>
+      <ul id="records"></ul>
+    </div>
+  </main>
+
+  <script>
+    // ===== Estado simples =====
+    const fileInput = document.getElementById('fileInput');
+    const btnTakePhoto = document.getElementById('btnTakePhoto');
+    const btnGetLoc = document.getElementById('btnGetLoc');
+    const btnSave = document.getElementById('btnSave');
+    const btnExport = document.getElementById('btnExport');
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    const latEl = document.getElementById('lat');
+    const lonEl = document.getElementById('lon');
+    const addressEl = document.getElementById('address');
+    const locationInfo = document.getElementById('locationInfo');
+    const recordsList = document.getElementById('records');
+
+    let currentImageData = null;
+    let currentCoords = null;
+    let currentAddress = '';
+
+    // Carrega registros do localStorage
+    const STORAGE_KEY = 'pwa-simple-records-v1';
+    function loadRecords(){
+      const raw = localStorage.getItem(STORAGE_KEY) || '[]';
+      try{return JSON.parse(raw);}catch{return []}
+    }
+    function saveRecords(arr){localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));}
+
+    function renderRecords(){
+      const arr = loadRecords();
+      recordsList.innerHTML = '';
+      if(arr.length === 0){recordsList.innerHTML = '<li class="small">Nenhum registro salvo ainda.</li>';return}
+      arr.slice().reverse().forEach(r => {
+        const li = document.createElement('li'); li.className='record';
+        li.innerHTML = `<img src="${r.image}" alt="foto"/><div class="meta"><div><strong>${new Date(r.createdAt).toLocaleString()}</strong></div><div class="small">${r.address || 'Endereço não disponível'}</div><div class="small">Lat: ${r.lat.toFixed(5)} — Lon: ${r.lon.toFixed(5)}</div></div>`;
+        recordsList.appendChild(li);
+      });
+    }
+
+    // Fluxo: tirar foto
+    btnTakePhoto.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', async (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        currentImageData = reader.result;
+        preview.src = currentImageData;
+        preview.style.display = 'block';
+        status.textContent = 'Foto carregada';
+      };
+      reader.readAsDataURL(f);
+    });
+
+    // Pegar localização com geolocation
+    btnGetLoc.addEventListener('click', ()=>{
+      if(!('geolocation' in navigator)){
+        alert('Geolocalização não suportada neste navegador. Use um celular moderno.');
+        return;
+      }
+      status.textContent = 'Pedindo permissão de localização...';
+      navigator.geolocation.getCurrentPosition(async (pos)=>{
+        const lat = pos.coords.latitude; const lon = pos.coords.longitude;
+        currentCoords = {lat, lon};
+        latEl.textContent = lat.toFixed(6); lonEl.textContent = lon.toFixed(6);
+        locationInfo.style.display = 'block';
+        status.textContent = 'Local obtido — consultando API de endereços...';
+        // Chamamos Nominatim (OpenStreetMap) — API pública para reverse geocoding
+        try{
+          // Atenção: para projetos reais respeite a política de uso do Nominatim (limite e identificação)
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1`;
+          const res = await fetch(url, {headers: {'User-Agent': 'PWA-Simple-App/1.0', 'Accept':'application/json'}});
+          if(!res.ok) throw new Error('Falha na API');
+          const data = await res.json();
+          const address = data.display_name || (data.address && Object.values(data.address).join(', ')) || '';
+          currentAddress = address;
+          addressEl.textContent = address;
+          status.textContent = 'Endereço obtido com sucesso.';
+        }catch(err){
+          currentAddress = '';
+          addressEl.textContent = '';
+          status.textContent = 'Não foi possível obter o endereço via API.';
+        }
+      }, (err)=>{
+        alert('Erro ao obter localização: '+err.message);
+        status.textContent = 'Permissão de localização negada ou erro.';
+      }, {enableHighAccuracy:true, timeout:10000});
+    });
+
+    // Salvar registro
+    btnSave.addEventListener('click', ()=>{
+      if(!currentImageData){alert('Tire ou selecione uma foto antes.');return}
+      if(!currentCoords){alert('Obtenha a localização antes.');return}
+      const arr = loadRecords();
+      const rec = {id:Date.now(), image: currentImageData, lat: currentCoords.lat, lon: currentCoords.lon, address: currentAddress, createdAt: new Date().toISOString() };
+      arr.push(rec); saveRecords(arr); renderRecords();
+      status.textContent = 'Registro salvo com sucesso.';
+      // Limpa estado atual para novo registro
+      currentImageData = null; currentCoords = null; currentAddress = '';
+      preview.style.display = 'none';
+      locationInfo.style.display = 'none';
+      preview.src = '';
+    });
+
+    btnExport.addEventListener('click', ()=>{
+      const data = JSON.stringify(loadRecords(), null, 2);
+      const blob = new Blob([data], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'registros-pwa.json'; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      status.textContent = 'Arquivo JSON gerado.';
+    });
+
+    // Init
+    renderRecords();
+
+    // Registro do service worker (precisa do arquivo sw.js no mesmo diretório)
+    if('serviceWorker' in navigator){
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then(()=>console.log('SW registrado')).catch(()=>console.log('Falha ao registrar SW'));
+      });
+    }
+
+    // Instalação PWA: mostramos dica quando o evento beforeinstallprompt ocorrer
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e)=>{
+      e.preventDefault(); deferredPrompt = e;
+      const installBtn = document.createElement('button');
+      installBtn.textContent = '📥 Instalar app'; installBtn.style.marginLeft='8px';
+      installBtn.className = '';
+      installBtn.onclick = async ()=>{
+        if(!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        deferredPrompt = null; installBtn.remove();
+      };
+      document.querySelector('header').appendChild(installBtn);
+    });
+  </script>
+</body>
+</html>
