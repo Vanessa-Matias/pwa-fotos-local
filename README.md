@@ -63,12 +63,3 @@ const address = data.display_name;
 * python -m http.server 8000
 
 * Acesse http://localhost:8000 em um navegador no computador ou http://<seu-ip-local>:8000 em um celular conectado à mesma rede Wi-Fi.
-
-## Screenshots Sugeridos para Entrega
-Para documentar a entrega da atividade, sugere-se anexar os seguintes screenshots:
-
-- Tela Principal: A interface inicial do aplicativo, mostrando os botões de ação e a lista de registros vazia.
-
-Diálogo de Permissão: A caixa de diálogo do navegador solicitando permissão para acessar a localização do usuário.
-
-Registro Salvo: A tela após tirar uma foto, obter a localização e salvar um registro, mostrando o novo item na lista de "Registros salvos" com a imagem, data e endereço.
